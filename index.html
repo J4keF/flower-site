@@ -23,13 +23,13 @@
         min-height: 100dvh;
       }
 
-      /* Resting on the bottom edge, centred */
+      /* Dead centre of the screen; the bloom opens outward from its middle */
       .bloom {
         position: fixed;
         left: 50%;
-        bottom: 0;
-        transform: translateX(-50%);
-        height: min(34vmin, 280px);
+        top: 50%;
+        transform: translate(-50%, -50%);
+        height: min(50vmin, 440px);
         width: auto;
         display: block;
         opacity: 0;
@@ -63,7 +63,7 @@
 
     <script>
       // Each flower is a folder of transparent frames of just the flower head,
-      // bud first, full bloom last, each resting on the bottom edge.
+      // bud first, full bloom last, centred so it opens outward.
       const FLOWERS = [
         { id: 'crocus', name: 'crocus', frames: 64 },
         {

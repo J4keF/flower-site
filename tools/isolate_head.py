@@ -8,7 +8,8 @@ Each frame is then shifted so the head's lowest point sits on the bottom
 edge (it rests on the page and grows upward) with its centre held steady,
 and all frames are written at one shared size.
 
-usage: isolate_head.py <in_dir> <out_dir> [radius_frac=0.025]
+usage: isolate_head.py <in_dir> <out_dir> [radius_frac=0.025] [bottom|center]
+       isolate_head.py --realign <in_dir> <out_dir> <bottom|center>   (frames already masked)
 """
 import os, sys
 import numpy as np
@@ -53,37 +54,50 @@ def head_mask(rgba, radius):
     rim_green = (g > r * 1.05) & (g > b * 1.05) & (sat > 0.12)
     return a * soft * ~rim_green
 
-def align(frames, pad=4):
-    """Shift frames so each head rests on the bottom edge, centred on a
-    smoothed horizontal track; returns frames cropped to one shared size."""
+def align(frames, anchor="bottom", pad=4):
+    """Re-place frames on one shared canvas, held steady by a smoothed track.
+
+    anchor="bottom": each head rests on the bottom edge and grows upward.
+    anchor="center": each head's centre sits at the canvas centre and the
+    bloom opens outward from it.
+    """
     boxes = []
     for f in frames:
         ys, xs = np.nonzero(f[..., 3] > 20)
         boxes.append((xs.min(), ys.min(), xs.max() + 1, ys.max() + 1))
     boxes = np.array(boxes, np.float32)
-    cx = (boxes[:, 0] + boxes[:, 2]) / 2
-    cx = ndimage.uniform_filter1d(cx, 9, mode="nearest")  # no sideways jitter
-    half = np.max(np.maximum(cx - boxes[:, 0], boxes[:, 2] - cx)) + pad
-    height = np.max(boxes[:, 3] - boxes[:, 1]) + pad
-    W, H = int(np.ceil(half * 2)), int(np.ceil(height))
+    cx = ndimage.uniform_filter1d((boxes[:, 0] + boxes[:, 2]) / 2, 9, mode="nearest")
+    cy = ndimage.uniform_filter1d((boxes[:, 1] + boxes[:, 3]) / 2, 9, mode="nearest")
+    W = int(np.ceil(2 * (np.max(np.maximum(cx - boxes[:, 0], boxes[:, 2] - cx)) + pad)))
+    if anchor == "center":
+        H = int(np.ceil(2 * (np.max(np.maximum(cy - boxes[:, 1], boxes[:, 3] - cy)) + pad)))
+    else:
+        H = int(np.ceil(np.max(boxes[:, 3] - boxes[:, 1]) + pad))
     out = []
-    for f, (x0, y0, x1, y1), c in zip(frames, boxes, cx):
+    for f, box, x, y in zip(frames, boxes, cx, cy):
+        top = H / 2 - y if anchor == "center" else H - box[3]
         canvas = Image.new("RGBA", (W, H))
-        canvas.paste(Image.fromarray(f), (int(round(W / 2 - c)), int(H - y1)))
+        canvas.paste(Image.fromarray(f), (int(round(W / 2 - x)), int(round(top))))
         out.append(canvas)
     return out
 
 if __name__ == "__main__":
-    src, out = sys.argv[1], sys.argv[2]
-    frac = float(sys.argv[3]) if len(sys.argv) > 3 else 0.025
+    args = sys.argv[1:]
+    realign = args[0] == "--realign"
+    if realign:
+        args = args[1:]
+    src, out = args[0], args[1]
+    frac = 0.025 if realign or len(args) < 3 else float(args[2])
+    anchor = args[2] if realign else (args[3] if len(args) > 3 else "bottom")
     os.makedirs(out, exist_ok=True)
     names = sorted(f for f in os.listdir(src) if f.endswith((".webp", ".png")))
     frames = []
     for f in names:
         rgba = np.asarray(Image.open(os.path.join(src, f)).convert("RGBA")).copy()
-        radius = max(2, round(rgba.shape[1] * frac))
-        rgba[..., 3] = (head_mask(rgba, radius) * 255).astype(np.uint8)
+        if not realign:
+            radius = max(2, round(rgba.shape[1] * frac))
+            rgba[..., 3] = (head_mask(rgba, radius) * 255).astype(np.uint8)
         frames.append(rgba)
-    for f, im in zip(names, align(frames)):
+    for f, im in zip(names, align(frames, anchor)):
         im.save(os.path.join(out, os.path.splitext(f)[0] + ".webp"), quality=86, method=6, exact=True)
     print(f"{len(names)} frames, {im.width}x{im.height}")
