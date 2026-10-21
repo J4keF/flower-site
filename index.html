@@ -15,18 +15,20 @@
         margin: 0;
         height: 100%;
         background-color: var(--bg-color);
+        touch-action: none; /* a finger drag scrubs the bloom instead of panning */
       }
 
-      /* Full-viewport canvas with the flower dead center, like the hinomaru */
       main {
         min-height: 100vh;
         min-height: 100dvh;
-        display: grid;
-        place-items: center;
       }
 
+      /* Tucked into the bottom-left corner */
       .bloom {
-        width: min(86vmin, 760px);
+        position: fixed;
+        left: 8px;
+        bottom: 8px;
+        width: min(40vmin, 320px);
         aspect-ratio: 1;
         display: block;
         opacity: 0;
@@ -71,17 +73,8 @@
         },
       ];
 
-      const DURATION = 5500; // ms from bud to stillness
-
-      // Steady time-lapse speed until CRUISE, then the speed falls off as
-      // (1 − u)² so the bloom glides into stillness with no visible stop.
-      const CRUISE = 0.4;
-      const SPEED = 1 / (CRUISE + (1 - CRUISE) / 3);
-      const easeOut = (t) => {
-        if (t < CRUISE) return SPEED * t;
-        const u = (t - CRUISE) / (1 - CRUISE);
-        return SPEED * (CRUISE + ((1 - CRUISE) * (1 - Math.pow(1 - u, 3))) / 3);
-      };
+      // How quickly the bloom catches up to the pointer (fraction per 60fps frame)
+      const FOLLOW = 0.12;
 
       const canvas = document.querySelector('.bloom');
       const ctx = canvas.getContext('2d');
@@ -126,25 +119,32 @@
         ctx.globalCompositeOperation = 'source-over';
       };
 
-      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      // The pointer's horizontal position scrubs the bloom: left edge is the
+      // bud, right edge is full bloom.
+      let target = 0;
+      const follow = (e) => {
+        target = Math.min(Math.max(e.clientX / window.innerWidth, 0), 1);
+      };
+      window.addEventListener('pointermove', follow, { passive: true });
+      window.addEventListener('pointerdown', follow, { passive: true });
 
       Promise.all(Array.from({ length: flower.frames }, (_, i) => loadFrame(i))).then((frames) => {
         const last = frames.length - 1;
-        if (reduceMotion) {
-          draw(frames, last);
-          canvas.classList.add('ready');
-          return;
-        }
-        draw(frames, 0);
+        let shown = target;
+        draw(frames, shown * last);
         canvas.classList.add('ready');
 
-        // rAF doesn't run in background tabs, so the bloom waits until it's seen
-        let start = null;
+        // Ease toward the pointer and only redraw while still catching up
+        let prev = null;
         const tick = (now) => {
-          if (start === null) start = now;
-          const t = Math.min((now - start) / DURATION, 1);
-          draw(frames, easeOut(t) * last);
-          if (t < 1) requestAnimationFrame(tick);
+          const dt = prev === null ? 16.7 : Math.min(now - prev, 100);
+          prev = now;
+          const gap = target - shown;
+          if (Math.abs(gap) > 0.0005) {
+            shown += gap * (1 - Math.pow(1 - FOLLOW, dt / 16.7));
+            draw(frames, shown * last);
+          }
+          requestAnimationFrame(tick);
         };
         requestAnimationFrame(tick);
       });
