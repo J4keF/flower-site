@@ -15,7 +15,7 @@
         margin: 0;
         height: 100%;
         background-color: var(--bg-color);
-        touch-action: none; /* a finger drag scrubs the bloom instead of panning */
+        cursor: pointer; /* anywhere on the page opens the bloom */
       }
 
       main {
@@ -57,7 +57,7 @@
   </head>
   <body>
     <main>
-      <canvas class="bloom" role="img" aria-label="A flower blooming"></canvas>
+      <canvas class="bloom" role="img" aria-label="A flower; click or press Enter to open it"></canvas>
     </main>
     <p class="credit" hidden></p>
 
@@ -65,7 +65,6 @@
       // Each flower is a folder of transparent frames of just the flower head,
       // bud first, full bloom last, centred so it opens outward.
       const FLOWERS = [
-        { id: 'crocus', name: 'crocus', frames: 64 },
         {
           id: 'rose',
           name: 'rose',
@@ -74,15 +73,24 @@
         },
       ];
 
-      // How quickly the bloom catches up to the pointer (fraction per 60fps frame)
-      const FOLLOW = 0.12;
+      const DURATION = 5500; // ms for a full bud-to-bloom run
+
+      // Steady time-lapse speed until CRUISE, then the speed falls off as
+      // (1 − u)² so the bloom glides into stillness with no visible stop.
+      const CRUISE = 0.4;
+      const SPEED = 1 / (CRUISE + (1 - CRUISE) / 3);
+      const easeOut = (t) => {
+        if (t < CRUISE) return SPEED * t;
+        const u = (t - CRUISE) / (1 - CRUISE);
+        return SPEED * (CRUISE + ((1 - CRUISE) * (1 - Math.pow(1 - u, 3))) / 3);
+      };
 
       const canvas = document.querySelector('.bloom');
       const ctx = canvas.getContext('2d');
       // ?flower=rose pins a specific flower (handy for previewing one)
       const pinned = FLOWERS.find((f) => f.id === new URLSearchParams(location.search).get('flower'));
       const flower = pinned || FLOWERS[Math.floor(Math.random() * FLOWERS.length)];
-      canvas.setAttribute('aria-label', `A ${flower.name} blooming`);
+      canvas.setAttribute('aria-label', `A ${flower.name}; click or press Enter to open it`);
 
       if (flower.credit) {
         const credit = document.querySelector('.credit');
@@ -119,37 +127,53 @@
         ctx.globalCompositeOperation = 'source-over';
       };
 
-      // The pointer's horizontal position scrubs the bloom: left edge is the
-      // bud, right edge is full bloom.
-      let target = 0;
-      const follow = (e) => {
-        target = Math.min(Math.max(e.clientX / window.innerWidth, 0), 1);
-      };
-      window.addEventListener('pointermove', follow, { passive: true });
-      window.addEventListener('pointerdown', follow, { passive: true });
+      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
       Promise.all(Array.from({ length: flower.frames }, (_, i) => loadFrame(i))).then((frames) => {
         const last = frames.length - 1;
         // frames are cropped to the flower head, so the canvas takes their size
         canvas.width = frames[0].naturalWidth;
         canvas.height = frames[0].naturalHeight;
-        let shown = target;
-        draw(frames, shown * last);
+        let shown = 0; // 0 = bud, 1 = full bloom
+        draw(frames, 0);
         canvas.classList.add('ready');
 
-        // Ease toward the pointer and only redraw while still catching up
-        let prev = null;
-        const tick = (now) => {
-          const dt = prev === null ? 16.7 : Math.min(now - prev, 100);
-          prev = now;
-          const gap = target - shown;
-          if (Math.abs(gap) > 0.0005) {
-            shown += gap * (1 - Math.pow(1 - FOLLOW, dt / 16.7));
+        // A click opens the bloom, the next closes it; clicking mid-way turns
+        // it around from wherever it is, at the same pace.
+        let goal = 0;
+        let run = null;
+        const toggle = () => {
+          goal = goal === 1 ? 0 : 1;
+          if (reduceMotion) {
+            shown = goal;
             draw(frames, shown * last);
+            return;
           }
+          const from = shown;
+          const duration = Math.max(DURATION * Math.abs(goal - from), 400);
+          const id = {};
+          run = id;
+          let start = null;
+          const tick = (now) => {
+            if (run !== id) return;
+            if (start === null) start = now;
+            const t = Math.min((now - start) / duration, 1);
+            shown = from + (goal - from) * easeOut(t);
+            draw(frames, shown * last);
+            if (t < 1) requestAnimationFrame(tick);
+          };
           requestAnimationFrame(tick);
         };
-        requestAnimationFrame(tick);
+
+        document.addEventListener('click', (e) => {
+          if (!e.target.closest('a')) toggle();
+        });
+        document.addEventListener('keydown', (e) => {
+          if ((e.key === 'Enter' || e.key === ' ') && !e.target.closest('a')) {
+            e.preventDefault();
+            toggle();
+          }
+        });
       });
     </script>
   </body>
