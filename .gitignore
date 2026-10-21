@@ -1,0 +1,6 @@
+.DS_Store
+# source footage, extracted frames and models stay out of the repo
+work/
+*.mp4
+*.webm
+*.onnx

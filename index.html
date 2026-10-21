@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f6f3ec" />
+    <title>Jake Fogel</title>
+    <style>
+      :root {
+        --bg-color: #f6f3ec; /* warm off-white */
+        --muted: #a29d93;
+      }
+
+      html, body {
+        margin: 0;
+        height: 100%;
+        background-color: var(--bg-color);
+      }
+
+      /* Full-viewport canvas with the flower dead center, like the hinomaru */
+      main {
+        min-height: 100vh;
+        min-height: 100dvh;
+        display: grid;
+        place-items: center;
+      }
+
+      .bloom {
+        width: min(86vmin, 760px);
+        aspect-ratio: 1;
+        display: block;
+        opacity: 0;
+        transition: opacity 0.6s ease;
+      }
+
+      .bloom.ready {
+        opacity: 1;
+      }
+
+      .credit {
+        position: fixed;
+        bottom: 14px;
+        left: 0;
+        right: 0;
+        text-align: center;
+        font: 11px/1.4 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        color: var(--muted);
+      }
+
+      .credit a {
+        color: inherit;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <canvas class="bloom" role="img" aria-label="A flower blooming"></canvas>
+    </main>
+    <p class="credit" hidden></p>
+
+    <script>
+      // Each flower is a folder of transparent frames, bud first, full bloom last.
+      const FLOWERS = [
+        { id: 'crocus', name: 'crocus', frames: 64, size: 840 },
+        {
+          id: 'rose',
+          name: 'rose',
+          frames: 64,
+          size: 1080,
+          credit: 'Rose time-lapse by Alex Tr, <a href="https://commons.wikimedia.org/wiki/File:Time-lapse_of_opening_red_rose_isolated_on_black_background.Blooming_red_roses_flower_buds.webm">CC BY 3.0</a>',
+        },
+      ];
+
+      const DURATION = 5500; // ms from bud to stillness
+
+      // Steady time-lapse speed until CRUISE, then the speed falls off as
+      // (1 − u)² so the bloom glides into stillness with no visible stop.
+      const CRUISE = 0.4;
+      const SPEED = 1 / (CRUISE + (1 - CRUISE) / 3);
+      const easeOut = (t) => {
+        if (t < CRUISE) return SPEED * t;
+        const u = (t - CRUISE) / (1 - CRUISE);
+        return SPEED * (CRUISE + ((1 - CRUISE) * (1 - Math.pow(1 - u, 3))) / 3);
+      };
+
+      const canvas = document.querySelector('.bloom');
+      const ctx = canvas.getContext('2d');
+      // ?flower=rose pins a specific flower (handy for previewing one)
+      const pinned = FLOWERS.find((f) => f.id === new URLSearchParams(location.search).get('flower'));
+      const flower = pinned || FLOWERS[Math.floor(Math.random() * FLOWERS.length)];
+      canvas.width = canvas.height = flower.size;
+      canvas.setAttribute('aria-label', `A ${flower.name} blooming`);
+
+      if (flower.credit) {
+        const credit = document.querySelector('.credit');
+        credit.innerHTML = flower.credit;
+        credit.hidden = false;
+      }
+
+      // decode() can reject under memory pressure with many large frames,
+      // so wait for load and treat decode() as a best-effort warm-up
+      const loadFrame = (i) =>
+        new Promise((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => img.decode().catch(() => {}).then(() => resolve(img));
+          img.onerror = reject;
+          img.src = `flowers/${flower.id}/${String(i).padStart(3, '0')}.webp`;
+        });
+
+      // Cross-fade between neighbouring frames. 'lighter' adds premultiplied
+      // pixels, so a·A + (1−a)·B is an exact blend even on transparent edges.
+      const draw = (frames, pos) => {
+        const i = Math.min(Math.floor(pos), frames.length - 1);
+        const t = pos - i;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (t < 0.001 || i === frames.length - 1) {
+          ctx.drawImage(frames[i], 0, 0);
+          return;
+        }
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = 1 - t;
+        ctx.drawImage(frames[i], 0, 0);
+        ctx.globalAlpha = t;
+        ctx.drawImage(frames[i + 1], 0, 0);
+        ctx.globalAlpha = 1;
+        ctx.globalCompositeOperation = 'source-over';
+      };
+
+      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+      Promise.all(Array.from({ length: flower.frames }, (_, i) => loadFrame(i))).then((frames) => {
+        const last = frames.length - 1;
+        if (reduceMotion) {
+          draw(frames, last);
+          canvas.classList.add('ready');
+          return;
+        }
+        draw(frames, 0);
+        canvas.classList.add('ready');
+
+        // rAF doesn't run in background tabs, so the bloom waits until it's seen
+        let start = null;
+        const tick = (now) => {
+          if (start === null) start = now;
+          const t = Math.min((now - start) / DURATION, 1);
+          draw(frames, easeOut(t) * last);
+          if (t < 1) requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      });
+    </script>
+  </body>
+</html>
