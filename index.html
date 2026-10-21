@@ -23,13 +23,13 @@
         min-height: 100dvh;
       }
 
-      /* Tucked into the bottom-left corner */
+      /* Resting on the bottom edge in the left corner */
       .bloom {
         position: fixed;
-        left: 8px;
-        bottom: 8px;
-        width: min(40vmin, 320px);
-        aspect-ratio: 1;
+        left: 16px;
+        bottom: 0;
+        height: min(34vmin, 280px);
+        width: auto;
         display: block;
         opacity: 0;
         transition: opacity 0.6s ease;
@@ -61,14 +61,14 @@
     <p class="credit" hidden></p>
 
     <script>
-      // Each flower is a folder of transparent frames, bud first, full bloom last.
+      // Each flower is a folder of transparent frames of just the flower head,
+      // bud first, full bloom last, each resting on the bottom edge.
       const FLOWERS = [
-        { id: 'crocus', name: 'crocus', frames: 64, size: 840 },
+        { id: 'crocus', name: 'crocus', frames: 64 },
         {
           id: 'rose',
           name: 'rose',
           frames: 64,
-          size: 1080,
           credit: 'Rose time-lapse by Alex Tr, <a href="https://commons.wikimedia.org/wiki/File:Time-lapse_of_opening_red_rose_isolated_on_black_background.Blooming_red_roses_flower_buds.webm">CC BY 3.0</a>',
         },
       ];
@@ -81,7 +81,6 @@
       // ?flower=rose pins a specific flower (handy for previewing one)
       const pinned = FLOWERS.find((f) => f.id === new URLSearchParams(location.search).get('flower'));
       const flower = pinned || FLOWERS[Math.floor(Math.random() * FLOWERS.length)];
-      canvas.width = canvas.height = flower.size;
       canvas.setAttribute('aria-label', `A ${flower.name} blooming`);
 
       if (flower.credit) {
@@ -130,6 +129,9 @@
 
       Promise.all(Array.from({ length: flower.frames }, (_, i) => loadFrame(i))).then((frames) => {
         const last = frames.length - 1;
+        // frames are cropped to the flower head, so the canvas takes their size
+        canvas.width = frames[0].naturalWidth;
+        canvas.height = frames[0].naturalHeight;
         let shown = target;
         draw(frames, shown * last);
         canvas.classList.add('ready');
